@@ -2,10 +2,13 @@ package main
 
 import (
 	"fmt"
-	"io"
+	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -21,6 +24,15 @@ type RequestBody struct {
 
 var serviceStatus = "Hello from github.com/IhsanSonz :8088 :)"
 
+func isReadable(filename string) bool {
+	f, err := os.Open(filename)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	return true
+}
+
 func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -31,53 +43,101 @@ func main() {
 	})
 
 	r.POST("/autoprint-pdf", func(c *gin.Context) {
-		var body RequestBody
-
-		// Get the printer_location from the form data
-		if printerLocation := c.PostForm("printer_location"); printerLocation != "" {
-			body.PrinterLocation = printerLocation
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "printer_location is required"})
+		_, header, err := c.Request.FormFile("pdf")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": true,
+				"msg":   "failed create pdf",
+				"hint":  "params error: invalid file",
+			})
 			return
 		}
 
-		// Get the pdf file from the request body
-		if pdf, err := io.ReadAll(c.Request.Body); err == nil {
-			body.PDF = pdf
-		} else {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read pdf file"})
+		if header.Header.Get("Content-Type") != "application/pdf" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": true,
+				"msg":   "failed create pdf",
+				"hint":  "params error: invalid type for file pdf (application/pdf needed)",
+			})
 			return
 		}
+
+		pdfDir := "./pdf"
+		if _, err := os.Stat(pdfDir); os.IsNotExist(err) {
+			err := os.MkdirAll(pdfDir, 0777)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": true,
+					"msg":   "failed create pdf",
+					"hint":  "failed to create pdf directory",
+				})
+				return
+			}
+		}
+
+		filename := time.Now().Format("20060102150405") + fmt.Sprintf("%05d", rand.Intn(90000)+1000) + ".pdf"
+		filename = filepath.Join(pdfDir, filename)
+		err = c.SaveUploadedFile(header, filename)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": true,
+				"msg":   "failed create pdf",
+				"hint":  "failed to save uploaded file",
+			})
+			return
+		}
+
+		if _, err := os.Stat(filename); os.IsNotExist(err) || !isReadable(filename) {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": true,
+				"msg":   "failed create pdf",
+				"hint":  "failed to find the uploaded file",
+			})
+			return
+		}
+
+		printTo := c.Request.FormValue("print_to")
+		if printTo == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": true,
+				"msg":   "failed create pdf",
+				"hint":  "params error: invalid print_to",
+			})
+			return
+		}
+
+		printSettings := c.Request.FormValue("print_settings")
+		if printSettings == "" {
+			printSettings = "1x"
+		}
+
+		command := fmt.Sprintf(".\\SumatraPDF-3.3.3-64.exe -print-settings \"%s\" -print-to \"%s\" .\\%s", printSettings, printTo, filename)
 
 		// Process the valid input
-		fmt.Println("Printer Location:", body.PrinterLocation)
-		fmt.Println("PDF:", body.PDF)
+		log.Println("pdf:", filename)
+		log.Println("printTo: ", printTo)
+		log.Println("printSettings: ", printSettings)
+		log.Println("command:", command)
 
-		// Check if the PDF is a valid file
-		if len(body.PDF) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "PDF file is required"})
+		err = exec.Command("powershell", "-Command", command).Run()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": true,
+				"msg":   "failed to print pdf",
+				"hint":  "failed to execute print command",
+			})
 			return
 		}
 
-		// Replace "path/to/your/exefile.exe" with the actual path to your executable.
-		exePath := "./SumatraPDF-3.3.3-64.exe"
-
-		// Create a new command to run the executable.
-		cmd := exec.Command(exePath)
-
-		// Set the standard output and error to os.Stdout and os.Stderr, respectively.
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
-		// Run the command.
-		if err := cmd.Run(); err != nil {
-			// fmt.Printf("Error running the executable: %v\n", err)
-			c.String(http.StatusNotFound, "AutoPrint PDF activation failed")
-			return
+		err = os.Remove(filename)
+		if err != nil {
+			log.Println(err)
 		}
 
-		// fmt.Println("Executable ran successfully.")
-		c.String(http.StatusOK, "AutoPrint PDF activated")
+		c.JSON(http.StatusOK, gin.H{
+			"error": false,
+			"msg":   "AutoPrint PDF activated",
+		})
 	})
 
 	// Start the API server in a separate Goroutine
