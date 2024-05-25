@@ -42,7 +42,11 @@ func main() {
 		c.String(http.StatusOK, serviceStatus)
 	})
 
+	// APIendpoint for autoprinting
 	r.POST("/autoprint-pdf", func(c *gin.Context) {
+		/**
+		 * Todo #1 : Save the pdf file from the request into local folder
+		 */
 		_, header, err := c.Request.FormFile("pdf")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -96,6 +100,9 @@ func main() {
 			return
 		}
 
+		/**
+		 * Todo #2 : Get printer name as the printing target
+		 */
 		printTo := c.Request.FormValue("print_to")
 		if printTo == "" {
 			c.JSON(http.StatusBadRequest, gin.H{
@@ -106,14 +113,22 @@ func main() {
 			return
 		}
 
+		/**
+		 * Todo #3 : Get print settings according to SumatraPDF settings (optional)
+		 */
 		printSettings := c.Request.FormValue("print_settings")
 		if printSettings == "" {
 			printSettings = "1x"
 		}
 
+		/**
+		 * Todo #4 : Use SumatraPDF to automate the printing process
+		 */
 		command := fmt.Sprintf(".\\SumatraPDF-3.3.3-64.exe -print-settings \"%s\" -print-to \"%s\" .\\%s", printSettings, printTo, filename)
 
-		// Process the valid input
+		/**
+		 * ! Just a debug :)
+		 */
 		log.Println("pdf:", filename)
 		log.Println("printTo: ", printTo)
 		log.Println("printSettings: ", printSettings)
@@ -129,11 +144,17 @@ func main() {
 			return
 		}
 
+		/**
+		 * Todo #5 : Delete the local pdf file
+		 */
 		err = os.Remove(filename)
 		if err != nil {
 			log.Println(err)
 		}
 
+		/**
+		 * Todo #6 : Send message cause it's all done (hooray)
+		 */
 		c.JSON(http.StatusOK, gin.H{
 			"error": false,
 			"msg":   "AutoPrint PDF activated",
